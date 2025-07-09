@@ -7,15 +7,18 @@ from .match_model import match_probabilities            # ← still the C++-back
 # -----------------------------------------------------------------------------
 def _win_matrix(strength_df: pd.DataFrame) -> np.ndarray:
     """N×N matrix of P(A beats B) – computed **once** per Streamlit session."""
-    lam = strength_df["lambda"].to_numpy()
-    N   = len(lam)
+    # ``match_probabilities`` expects **log-strengths**.  ``calc_team_strength``
+    # already provides these in the ``strength`` column whereas ``lambda`` is
+    # the derived Poisson rate.  Using the latter was skewing favourites.
+    strength = strength_df["strength"].to_numpy()
+    N   = len(strength)
     P   = np.empty((N, N), dtype=np.float64)
     for i in range(N):
         for j in range(N):
             if i == j:
                 P[i, j] = 0.5                       # never used
             else:
-                P[i, j] = match_probabilities(lam[i], lam[j])["home"]
+                P[i, j] = match_probabilities(strength[i], strength[j])["home"]
     return P
 
 # -----------------------------------------------------------------------------

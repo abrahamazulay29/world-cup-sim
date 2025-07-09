@@ -8,6 +8,5 @@ def test_strength_centered():
         {"team": ["A", "B", "C"], "implied_prob": [0.4, 0.35, 0.25]}
     )
     out = calc_team_strength(df)
-    # strengths are mean-centred in *log* space  ⇒  geometric mean == 1
-    import numpy as np
-    assert abs(np.log(out["strength"]).mean()) < 1e-9
+    # strengths are mean-centred in log space ⇒ arithmetic mean ≈ 0
+    assert abs(out["strength"].mean()) < 1e-9
