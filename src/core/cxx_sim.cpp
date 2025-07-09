@@ -1,80 +1,145 @@
-// minimal, self-contained Monte-Carlo core -------------------------------
+//  src/core/cxx_sim.cpp  -----------------------------------------------------
+//  C++17 fast Monte-Carlo replica of the full WC-2026 format
+//  (12×4 groups  ➜  32-team knock-out bracket)
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <random>
-#include <unordered_map>
 #include <vector>
 #include <string>
+#include <array>
+#include <tuple>
+#include <algorithm>
+#include <numeric>
+#include <unordered_map>
 
-namespace py  = pybind11;
+namespace py = pybind11;
 
-// simple Poisson pmf (λ^k e^-λ / k!) for k ≤ 8 – inline table of factorials
-static const double KFACT[] = {1, 1, 2, 6, 24, 120, 720, 5040, 40320};
+// ---------- utilities -------------------------------------------------------
+static const double KFACT[] = {1,1,2,6,24,120,720,5040,40320};
+inline double pois(int k,double l){return std::pow(l,k)*std::exp(-l)/KFACT[k];}
 
-inline double poisson_pmf(int k, double lambda) {
-    return std::pow(lambda, k) * std::exp(-lambda) / KFACT[k];
+struct MatchRes {int gf, ga;};
+MatchRes sample_match(double lamA,double lamB,std::mt19937& g){
+    std::discrete_distribution<> dA(
+        {pois(0,lamA),pois(1,lamA),pois(2,lamA),pois(3,lamA),
+         pois(4,lamA),pois(5,lamA),pois(6,lamA),pois(7,lamA),pois(8,lamA)});
+    std::discrete_distribution<> dB(
+        {pois(0,lamB),pois(1,lamB),pois(2,lamB),pois(3,lamB),
+         pois(4,lamB),pois(5,lamB),pois(6,lamB),pois(7,lamB),pois(8,lamB)});
+    return {dA(g), dB(g)};
 }
-
-// probability that team A beats team B in a single match
-double win_prob(double lamA, double lamB) {
-    double pA = 0.0, pB = 0.0, pDraw = 0.0;
-    for (int i = 0; i <= 8; ++i) {
-        double pi = poisson_pmf(i, lamA);
-        for (int j = 0; j <= 8; ++j) {
-            double pj = poisson_pmf(j, lamB);
-            if (i > j)       pA    += pi * pj;
-            else if (i < j)  pB    += pi * pj;
-            else             pDraw += pi * pj;
-        }
-    }
-    // FIFA knock-outs decide draws with penalties ⇒ add half draw prob
-    return pA + 0.5 * pDraw;
+double win_prob(double lA,double lB){
+    double pA=0,pB=0,pD=0;
+    for(int i=0;i<=8;++i){double pi=pois(i,lA);
+      for(int j=0;j<=8;++j){double pj=pois(j,lB);
+        if(i>j) pA+=pi*pj; else if(i<j) pB+=pi*pj; else pD+=pi*pj;}}
+    return pA + .5*pD;         // penalties 50-50
 }
-
-// ------------------------------------------------------------------------
-py::str simulate_once(const std::vector<std::string>& teams,
-                      const std::vector<double>&    lambdas,
-                      std::mt19937&                 rng)
+// ---------- group stage -----------------------------------------------------
+struct TeamStat{int id;int pts=0,gd=0,gf=0;};
+bool rank_cmp(const TeamStat&a,const TeamStat&b,std::mt19937&rng){
+    if(a.pts!=b.pts) return a.pts>b.pts;
+    if(a.gd !=b.gd ) return a.gd >b.gd;
+    if(a.gf !=b.gf ) return a.gf >b.gf;
+    return std::generate_canonical<double,10>(rng)<.5;
+}
+void play_group(const std::vector<double>& lam,
+                const std::array<int,4>& idx,
+                std::vector<int>& top2,
+                TeamStat& third,
+                std::mt19937& rng)
 {
-    // round-robin strength: λ = base * strength
-    std::uniform_int_distribution<> pick(0, static_cast<int>(teams.size() - 1));
-
-    // naive “draw”: pick two distinct teams until one wins
-    while (true) {
-        int ia = pick(rng), ib = pick(rng);
-        if (ia == ib) continue;
-        double pA = win_prob(lambdas[ia], lambdas[ib]);
-        if (std::generate_canonical<double, 10>(rng) < pA)
-            return py::str(teams[ia]);
-        else
-            return py::str(teams[ib]);
+    std::array<TeamStat,4> st;
+    for(int k=0;k<4;++k){st[k].id=idx[k];}
+    // six matches
+    for(int a=0;a<4;++a)for(int b=a+1;b<4;++b){
+        auto m = sample_match(lam[idx[a]], lam[idx[b]], rng);
+        st[a].gf+=m.gf; st[a].gd+=m.gf-m.ga;
+        st[b].gf+=m.ga; st[b].gd+=m.ga-m.gf;
+        if   (m.gf>m.ga){st[a].pts+=3;}
+        else if(m.gf<m.ga){st[b].pts+=3;}
+        else{st[a].pts+=1; st[b].pts+=1;}
     }
+    std::shuffle(st.begin(),st.end(),rng);        // random tie-break root
+    std::sort(st.begin(),st.end(),
+              [&](auto&a,auto&b){return rank_cmp(a,b,rng);} );
+    top2.push_back(st[0].id);
+    top2.push_back(st[1].id);
+    third = st[2];                                // candidate for “best 3rd”
 }
+// ---------- knock-out bracket (32 teams) ------------------------------------
+int play_knock(const std::vector<double>& lam,
+               std::vector<int> teams,
+               std::mt19937& rng)
+{
+    while(teams.size()>1){
+        std::vector<int> nxt;
+        for(size_t i=0;i<teams.size();i+=2){
+            double pA = win_prob(lam[teams[i]], lam[teams[i+1]]);
+            nxt.push_back( std::generate_canonical<double,10>(rng)<pA ? teams[i]
+                                                                     : teams[i+1] );
+        }
+        teams.swap(nxt);
+    }
+    return teams[0];
+}
+// ---------- main simulator ---------------------------------------------------
+std::string simulate_tournament_once(const std::vector<double>& lam,
+                                     std::mt19937& rng)
+{
+    // assume len(teams)==48  (pass in exactly 48 lambdas/teams)
+    std::array<int,48> id{};
+    std::iota(id.begin(), id.end(), 0);
+    std::shuffle(id.begin(), id.end(), rng); 
+    // ---- group stage
+    std::vector<int>  ko32;
+    std::vector<TeamStat> thirds;
+    for(int g=0; g<12; ++g){
+        std::array<int,4> idx{ id[4*g], id[4*g+1], id[4*g+2], id[4*g+3] };
+        TeamStat third;
+        play_group(lam, idx, ko32, third, rng);
+        thirds.push_back(third);
+    }
+    // select best 8 thirds
+    std::shuffle(thirds.begin(),thirds.end(),rng);
+    std::sort(thirds.begin(),thirds.end(),
+              [&](auto&a,auto&b){return rank_cmp(a,b,rng);} );
+    for(int k=0;k<8;++k) ko32.push_back(thirds[k].id);
 
-// exposed bulk Monte-Carlo ------------------------------------------------
+    // ---- fixed bracket (simple seed: ko32 order)
+    return std::to_string( play_knock(lam, ko32, rng) ); // returns id as string
+}
+// ---------- bulk Monte-Carlo wrapper ----------------------------------------
 py::dict simulate_many(const std::vector<std::string>& teams,
                        const std::vector<double>&    lambdas,
-                       int                           n_runs,
-                       unsigned                      seed)
+                       int                           n_runs = 20000,
+                       unsigned                      seed   = 0)
 {
-    std::unordered_map<std::string, int> win_count;
-    for (const auto& t : teams) win_count[t] = 0;
-
+    std::vector<int> wins(teams.size());
     std::mt19937 rng(seed);
-    for (int r = 0; r < n_runs; ++r) {
-        py::str champ = simulate_once(teams, lambdas, rng);
-        ++win_count[champ];
+    for(int r=0;r<n_runs;++r){
+        int champ = std::stoi( simulate_tournament_once(lambdas, rng) );
+        ++wins[champ];
     }
-
-    py::dict out;
-    for (const auto& kv : win_count)
-        out[kv.first.c_str()] = static_cast<double>(kv.second) / n_runs;
-    return out;
+    py::dict d;
+    for(size_t i=0;i<teams.size();++i)
+        d[py::str(teams[i])] = double(wins[i])/n_runs;
+    return d;
 }
+// ----------------------------------------------------------------------------
+/* … existing code … */
 
 PYBIND11_MODULE(cxx_sim, m) {
-    m.doc() = "C++17 fast Monte-Carlo core for world-cup-sim";
+    m.doc() = "C++17 fast Poisson helpers for world-cup-sim";
+
+    // expose the single-match helper so Python can call it
+    m.def("win_prob", &win_prob,
+          py::arg("lambda_a"), py::arg("lambda_b"));
+
+    // the naive tournament we tried before – you can keep it or drop it
     m.def("simulate_many", &simulate_many,
           py::arg("teams"), py::arg("lambdas"),
-          py::arg("n_runs") = 20000, py::arg("seed") = 0U);
+          py::arg("n_runs") = 20'000, py::arg("seed") = 0U);
 }
+

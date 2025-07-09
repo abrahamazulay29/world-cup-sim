@@ -1,89 +1,51 @@
+#  src/core/tournament.py  -----------------------------------------------
 from __future__ import annotations
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple
+from .match_model import match_probabilities            # ← still the C++-backed Poisson
 
-from .group_draw import make_pots, draw_groups
-from .group_stage import play_group
-from .match_model import match_probabilities
-
-
-def rank_best_thirds(group_results: Dict[str, List[Tuple[str, int, int]]]) -> List[str]:
-    thirds = [res[2] for res in group_results.values()]  # (team, pts, gd)
-    thirds.sort(key=lambda x: (x[1], x[2]), reverse=True)
-    return [t for t, _, _ in thirds[:8]]
-
-
-def build_bracket(group_results: Dict[str, List[Tuple[str, int, int]]],
-                  best_thirds: List[str],
-                  rng: np.random.Generator) -> List[Tuple[str, str]]:
-    winners = [res[1][0][0] for res in sorted(group_results.items())]
-    runners = [res[1][1][0] for res in sorted(group_results.items())]
-    rng.shuffle(best_thirds)
-
-    pairings: List[Tuple[str, str]] = []
-    # Pattern: W_A vs BT1, W_B vs R_D, W_C vs BT2, W_D vs R_B, etc.
-    mapping = [
-        (0, ("winner", 0), ("bt", 0)),
-        (1, ("winner", 1), ("runner", 3)),
-        (2, ("winner", 2), ("bt", 1)),
-        (3, ("winner", 3), ("runner", 1)),
-        (4, ("winner", 4), ("bt", 2)),
-        (5, ("winner", 5), ("runner", 7)),
-        (6, ("winner", 6), ("bt", 3)),
-        (7, ("winner", 7), ("runner", 5)),
-        (8, ("winner", 8), ("runner", 10)),
-        (9, ("winner", 9), ("bt", 4)),
-        (10, ("winner", 10), ("runner", 8)),
-        (11, ("winner", 11), ("bt", 5)),
-        (12, ("runner", 0), ("bt", 6)),
-        (13, ("runner", 2), ("bt", 7)),
-        (14, ("runner", 4), ("runner", 6)),
-        (15, ("runner", 9), ("runner", 11)),
-    ]
-
-    idx = {"winner": winners, "runner": runners, "bt": best_thirds}
-    for _, left, right in mapping:
-        pairings.append((idx[left[0]][left[1]], idx[right[0]][right[1]]))
-
-    return pairings
-
-
-def knockout(pairings: List[Tuple[str, str]], strength: Dict[str, float], rng: np.random.Generator) -> str:
-    while len(pairings) > 1:
-        nxt = []
-        for a, b in pairings:
-            probs = match_probabilities(strength[a], strength[b])
-            r = rng.random()
-            if r < probs["home"]:
-                nxt.append(a)
-            elif r < probs["home"] + probs["draw"]:
-                nxt.append(a if rng.random() < 0.5 else b)
+# -----------------------------------------------------------------------------
+def _win_matrix(strength_df: pd.DataFrame) -> np.ndarray:
+    """N×N matrix of P(A beats B) – computed **once** per Streamlit session."""
+    lam = strength_df["lambda"].to_numpy()
+    N   = len(lam)
+    P   = np.empty((N, N), dtype=np.float64)
+    for i in range(N):
+        for j in range(N):
+            if i == j:
+                P[i, j] = 0.5                       # never used
             else:
-                nxt.append(b)
-        rng.shuffle(nxt)
-        pairings = list(zip(nxt[::2], nxt[1::2]))
-    a, b = pairings[0]
-    return a if rng.random() < match_probabilities(strength[a], strength[b])["home"] else b
+                P[i, j] = match_probabilities(lam[i], lam[j])["home"]
+    return P
 
-
-def simulate_tournament_once(strength_df: pd.DataFrame, rng: np.random.Generator) -> str:
-    strength = dict(zip(strength_df["team"], strength_df["strength"]))
-    groups = draw_groups(make_pots(strength_df), rng)
-
-    group_results = {}
-    for g, teams in groups.items():
-        group_results[g] = play_group(teams, strength, rng)
-
-    best_thirds = rank_best_thirds(group_results)
-    pairings = build_bracket(group_results, best_thirds, rng)
-    champion = knockout(pairings, strength, rng)
-    return champion
-
-
-def simulate_many(strength_df: pd.DataFrame, n_runs: int = 100_000, seed: int | None = None) -> pd.DataFrame:
+# -----------------------------------------------------------------------------
+def simulate_many(strength_df: pd.DataFrame,
+                  n_runs: int = 20_000,
+                  seed: int | None = None) -> pd.DataFrame:
+    """Fast MC using a *pre-computed* win-probability matrix."""
     rng = np.random.default_rng(seed)
-    winners = [simulate_tournament_once(strength_df, rng) for _ in range(n_runs)]
-    vc = pd.Series(winners).value_counts().rename_axis("team").to_frame("champion_prob")
-    vc["champion_prob"] /= n_runs
-    return vc.reset_index()
+    teams = strength_df["team"].tolist()
+    idx   = np.arange(len(teams))
+    P     = _win_matrix(strength_df)                # ← heavy once; then reused
+
+    win_count = dict.fromkeys(teams, 0)
+
+    for _ in range(n_runs):
+        alive = idx.copy()
+
+        # 1. naïve knock-out (64 → 1) – you can drop in your real bracket here
+        while len(alive) > 1:
+            rng.shuffle(alive)
+            next_round = []
+            for a, b in alive.reshape(-1, 2):
+                if rng.random() < P[a, b]:
+                    next_round.append(a)
+                else:
+                    next_round.append(b)
+            alive = np.array(next_round, dtype=int)
+
+        win_count[teams[int(alive[0])]] += 1
+
+    probs = (pd.Series(win_count, name="champion_prob") / n_runs
+             ).rename_axis("team").reset_index()
+    return probs.sort_values("champion_prob", ascending=False)

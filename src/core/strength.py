@@ -1,26 +1,35 @@
+#  src/core/strength.py  ------------------------------------------------------
 from __future__ import annotations
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-_BASE_LAMBDA = 1.45   # avg goals per team per match (Europe 2022-24)
+MU = np.log(1.35)               # ≈ World-Cup goals per team, per match
 
-def calc_team_strength(df: pd.DataFrame, base_lambda: float = _BASE_LAMBDA) -> pd.DataFrame:
+
+def calc_team_strength(df: pd.DataFrame, mu: float = MU) -> pd.DataFrame:
     """
-    Turn implied championship probabilities into a per-match scoring intensity.
+    Convert bookmaker implied-championship probabilities into per-match
+    Poisson scoring intensities.
 
-    Returns columns:
-        team, strength (unit-norm), implied_prob, lambda
+    Returns columns
+        team
+        strength   – **log-strength**, geometric mean == 0
+        implied_prob
+        lambda     – Poisson rate  λ = exp( μ + strength )
     """
+    # 1. average across the books
     out = (
         df.groupby("team", as_index=False)["implied_prob"]
-          .mean()                             # bookmaker average
+          .mean()
           .sort_values("implied_prob", ascending=False)
     )
-    log_s = np.log(out["implied_prob"])
-    log_s -= log_s.mean()
-    out["strength"] = np.exp(log_s)
 
-    # expected goals λ = base × strength
-    out["lambda"] = base_lambda * out["strength"]
+    # 2. centre *in log space*  →  geo-mean strength = 1
+    log_s = np.log(out["implied_prob"])
+    log_s -= log_s.mean()            # now mean(log_s) == 0
+    out["strength"] = log_s          # ← KEEP **log** value
+
+    # 3. per-match Poisson rate
+    out["lambda"] = np.exp(mu + out["strength"])
 
     return out[["team", "strength", "implied_prob", "lambda"]]
