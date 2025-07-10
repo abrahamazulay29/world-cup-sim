@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Why this project matters for Quant Finance & Software Engineering
+## 🎯 Why this project matters
 
 * **Market calibration** → identical workflow to pricing exotic derivatives: pull quotes ⇢ remove edge ⇢ map to model parameters.
 * **Stochastic simulation** → large‑scale Monte‑Carlo with a C++17/pybind11 core, variance‑reduced sampling, and vectorised maths.
