@@ -4,7 +4,7 @@
 
 ---
 
-## 🎯 Why this project matters
+## Why this project matters
 
 * **Market calibration** → identical workflow to pricing exotic derivatives: pull quotes ⇢ remove edge ⇢ map to model parameters.
 * **Stochastic simulation** → large‑scale Monte‑Carlo with a C++17/pybind11 core, variance‑reduced sampling, and vectorised maths.
@@ -13,7 +13,7 @@
 
 ---
 
-## 📦 Tech Stack & Libraries
+## Tech Stack & Libraries
 
 | Layer           | Tools                                                                  |
 | --------------- | ---------------------------------------------------------------------- |
@@ -26,7 +26,7 @@
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1 – clone & install (C++ builds automatically if a compiler is present)
@@ -43,7 +43,7 @@ $ streamlit run app/Simulator.py
 
 ---
 
-## 🔍 How it Works
+## How it Works
 
 1. **Fetch outright prices** `src/data/odds_client.py` pulls Futures from The Odds API (JSON).
 2. **Strip the vig** Convert American odds → raw implied *P*; divide by column sum to get “fair” probabilities.
@@ -55,7 +55,7 @@ $ streamlit run app/Simulator.py
 
 ---
 
-## 🔢 Example Output
+## Example Output
 
 | Team   | Vig‑free implied | Simulated title prob |
 | ------ | ---------------- | -------------------- |
@@ -67,7 +67,7 @@ $ streamlit run app/Simulator.py
 
 ---
 
-## 🛠️ Directory Layout
+## Directory Layout
 
 ```
 ├── app/                 # Streamlit front‑end
@@ -84,7 +84,7 @@ $ streamlit run app/Simulator.py
 
 ---
 
-## 🗺️ Roadmap / Stretch Goals
+## Roadmap / Stretch Goals
 
 * **Golden Boot / Ball simulations**
 * **Parallel backend (Ray / Dask) for 1 M+ runs**
@@ -93,6 +93,6 @@ $ streamlit run app/Simulator.py
 
 ---
 
-## 👤 Author
+## Author
 
-Abraham — Software Engineer & budding Quant.
+Abraham — Software Engineer
