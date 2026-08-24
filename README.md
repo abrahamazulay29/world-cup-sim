@@ -18,7 +18,7 @@
 | Layer           | Tools                                                                  |
 | --------------- | ---------------------------------------------------------------------- |
 | **Languages**   | Python 3.11 • C++17 (pybind11 module)                                  |
-| **Numerics**    | NumPy • SciPy • Pandas • Numba (⚡)                                     |
+| **Numerics**    | NumPy • SciPy • Pandas • Numba                                         |
 | **Perf Engine** | `cpp/core.cpp` compiled to `libwc_sim.so` at install time              |
 | **API**         | [The Odds API](https://theoddsapi.com/) for real‑time sportsbook lines |
 | **Web UI**      | Streamlit                                                              |
