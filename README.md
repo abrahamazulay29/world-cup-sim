@@ -30,7 +30,7 @@
 
 ```bash
 # 1 – clone & install (C++ builds automatically if a compiler is present)
-$ git clone https://github.com/abrahamazulay29/world‑cup‑sim.git
+$ git clone https://github.com/abrahamazulay29/world-cup-sim.git
 $ cd world‑cup‑sim
 $ pip install -r requirements.txt
 # 2 – add Odds API key
